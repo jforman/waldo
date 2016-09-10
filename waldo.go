@@ -1,8 +1,3 @@
-// https://godoc.org/golang.org/x/oauth2/google
-// https://cloud.google.com/dns/api/v1/changes/create
-//
-// https://github.com/kelseyhightower/dns01-exec-plugins/blob/master/googledns/client.go
-
 package main
 
 import (
