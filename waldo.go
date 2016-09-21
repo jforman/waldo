@@ -20,9 +20,9 @@ import (
 var currentExternalIP string
 var credentialsPath string
 var ctx context.Context
-var errorCount int
 var externalIP string
 var managedZone string
+var oneShot bool
 var recordName string
 var recordType string
 var recordTTL int64
@@ -38,6 +38,8 @@ func init() {
 				"DNS Host Resource Record to Update in Cloud DNS.")
 	flag.StringVar(&managedZone, "managedZone", "",
 				"Zone name in Google Cloud DNS.")
+	flag.BoolVar(&oneShot, "oneShot", false,
+				"Attempt to perform one update and then quit.")
 	flag.StringVar(&project, "project", "",
 				"Project name within Google Cloud associated with Managed Zone.")
 	flag.StringVar(&recordType, "recordType", "A",
@@ -157,19 +159,27 @@ func main() {
 		os.Exit(0)
 	}()
 
-
+	if oneShot {
+		fmt.Println("One-shot mode. Attempting to perform one update only.")
+	}
 	for {
 		externalIP, err := ipify.GetIp()
 
 		if err != nil {
 			fmt.Printf("Unable to determine external IP address: %v. No update performed. \n", err)
 			time.Sleep(waitDuration)
+			if oneShot {
+				os.Exit(1)
+			}
 			continue
 		}
 
 		record, doesIpMatch, err := getDNSRecord(dnsClient, recordName, externalIP)
 		if err != nil {
 			fmt.Printf("Error getting DNS record: %v. Skipping evaluation.\n", err)
+			if oneShot {
+				os.Exit(1)
+			}
 			time.Sleep(waitDuration)
 			continue
 		}
@@ -177,6 +187,9 @@ func main() {
 		if (record != nil) {
 			// Record with matching name was found, but it does not match old entry.
 			if doesIpMatch {
+				if oneShot {
+					os.Exit(1)
+				}
 				time.Sleep(waitDuration)
 				continue
 			}
@@ -185,12 +198,18 @@ func main() {
 			if err != nil {
 				fmt.Printf("Error in deleting record: %v.\n", err)
 			}
+			if oneShot {
+				os.Exit(1)
+			}
 		}
 
 		// No previous record was found. So let's add it.
 		err = addDNSRecord(dnsClient, externalIP)
 		if err != nil {
 			fmt.Printf("Error in adding DNS record: %v.\n", err)
+		}
+		if oneShot {
+			os.Exit(0)
 		}
 		time.Sleep(waitDuration)
 	}
