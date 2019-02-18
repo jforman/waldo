@@ -1,20 +1,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"github.com/rdegges/go-ipify"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"golang.org/x/net/context"
+	"github.com/rdegges/go-ipify"
+
 	"golang.org/x/oauth2"
-  "golang.org/x/oauth2/google"
-	"google.golang.org/cloud"
-	"google.golang.org/api/dns/v1"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/dns/v2beta1"
 )
 
 var currentExternalIP string
@@ -31,55 +31,49 @@ var waitDuration time.Duration
 
 func init() {
 	flag.DurationVar(&waitDuration, "waitDuration", 300*time.Second,
-		 		"Interval in seconds to check public IP address.")
+		"Interval in seconds to check public IP address.")
 	flag.StringVar(&credentialsPath, "credentialsPath", "",
-				"Path to JSON credentials file for updating DNS.")
+		"Path to JSON credentials file for updating DNS.")
 	flag.StringVar(&recordName, "recordName", "",
-				"DNS Host Resource Record to Update in Cloud DNS.")
+		"DNS Host Resource Record to Update in Cloud DNS.")
 	flag.StringVar(&managedZone, "managedZone", "",
-				"Zone name in Google Cloud DNS.")
+		"Zone name in Google Cloud DNS.")
 	flag.BoolVar(&oneShot, "oneShot", false,
-				"Attempt to perform one update and then quit.")
+		"Attempt to perform one update and then quit.")
 	flag.StringVar(&project, "project", "",
-				"Project name within Google Cloud associated with Managed Zone.")
+		"Project name within Google Cloud associated with Managed Zone.")
 	flag.StringVar(&recordType, "recordType", "A",
-				"RR Datatype for the DNS record.")
+		"RR Datatype for the DNS record.")
 	flag.Int64Var(&recordTTL, "recordttl", 60,
-				"TTL (minutes) for the DNS record TTL")
+		"TTL (minutes) for the DNS record TTL")
 }
 
 func getFormattedRecordName(recordName string) string {
 	return fmt.Sprintf("%v.", recordName)
 }
 
-func getHttpClient() (*dns.Service, error) {
-	authJson, err := ioutil.ReadFile(credentialsPath)
+func getDNSClient() (*dns.Service, error) {
+	// https://github.com/golang/oauth2/blob/master/google/example_test.go
+	data, err := ioutil.ReadFile(credentialsPath)
 	if err != nil {
 		return nil, err
 	}
 
-	conf, err := google.JWTConfigFromJSON(authJson, dns.CloudPlatformScope)
-
+	conf, err := google.JWTConfigFromJSON(data, dns.CloudPlatformScope)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx := cloud.NewContext(project, conf.Client(oauth2.NoContext))
-
-	hc, err := google.DefaultClient(ctx, dns.CloudPlatformScope)
+	client := conf.Client(oauth2.NoContext)
+	dnsService, err := dns.New(client)
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := dns.New(hc)
-	if err != nil {
-		return nil, err
-	}
-
-	return c, err
+	return dnsService, err
 }
 
-func getDNSRecord(dnsClient *dns.Service, recordName string, ipAddress string) (record *dns.ResourceRecordSet, doesIpMatch bool, err error) {
+func getDNSRecord(dnsClient *dns.Service, recordName string, cloudIpAddress string) (record *dns.ResourceRecordSet, doesIpMatch bool, err error) {
 	records, err := dnsClient.ResourceRecordSets.List(project, managedZone).Do()
 	if err != nil {
 		return nil, false, err
@@ -87,8 +81,8 @@ func getDNSRecord(dnsClient *dns.Service, recordName string, ipAddress string) (
 
 	for _, record := range records.Rrsets {
 		if (record.Name == getFormattedRecordName(recordName)) &&
-		 	(record.Type == recordType) {
-			if (record.Rrdatas[0] == ipAddress) {
+			(record.Type == recordType) {
+			if record.Rrdatas[0] == cloudIpAddress {
 				// A fully matching record was found.
 				return record, true, nil
 			}
@@ -146,7 +140,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	dnsClient, err := getHttpClient()
+	dnsClient, err := getDNSClient()
 	if err != nil {
 		fmt.Printf("Error getting dnsClient: %v.\n", err)
 		os.Exit(1)
@@ -154,14 +148,13 @@ func main() {
 
 	// Create function to die when receiving SIGINT/SIGTERM.
 	go func() {
-		sig := <- sigs
+		sig := <-sigs
 		fmt.Printf("Received signal! %v.\n", sig)
 		os.Exit(0)
 	}()
 
-	if oneShot {
-		fmt.Println("One-shot mode. Attempting to perform one update only.")
-	}
+	fmt.Printf("Waldo started. waitDuration: %v, oneShot: %v, credentialsPath: %v, recordName: %v, managedZone: %v, project: %v, recordType: %v, recordTTL: %v.\n", waitDuration, oneShot, credentialsPath, recordName, managedZone, project, recordType, recordTTL)
+
 	for {
 		externalIP, err := ipify.GetIp()
 
@@ -184,22 +177,20 @@ func main() {
 			continue
 		}
 
-		if (record != nil) {
-			// Record with matching name was found, but it does not match old entry.
+		if record != nil {
 			if doesIpMatch {
 				if oneShot {
-					os.Exit(1)
+					fmt.Println("IP addresses match. Nothing to do in oneShot mode.")
+					os.Exit(0)
 				}
 				time.Sleep(waitDuration)
 				continue
 			}
 			// Record exists, but IP does not match. So we need to delete the old one.
+			fmt.Println("IP address of record does not match record.")
 			err := deleteDNSRecord(dnsClient, record)
 			if err != nil {
 				fmt.Printf("Error in deleting record: %v.\n", err)
-			}
-			if oneShot {
-				os.Exit(1)
 			}
 		}
 
