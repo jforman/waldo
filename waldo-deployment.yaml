@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waldo-deployment
+spec:
+  selector:
+    matchLabels:
+      app: waldo-deployment
+  template:
+    metadata:
+      labels:
+        app: waldo-deployment
+    spec:
+      containers:
+      - name: waldo-deployment
+        image: jforman/waldo:latest
+        command:
+        - /waldo
+        args:
+        - -credentialsPath=/creds/waldo.json
+        - -recordName=waldo-ddns.domain.net
+        - -managedZone=domain-net
+        - -project=your-cloud-project-prod
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        volumeMounts: 
+        - name: creds
+          mountPath: "/creds"
+          readOnly: true
+      volumes:
+      - name: creds
+        secret:
+          secretName: waldo-creds

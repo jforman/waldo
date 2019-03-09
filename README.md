@@ -19,6 +19,22 @@ There must be a way to detect if has changed, and update my DNS records accordin
 go run waldo.go --credentialsPath adc.json --managedZone $ZONEFROMCLOUDDNS --project $PROJECTNAME --recordName fqdn.to.keep.updated.tld
 ```
 
+## Run On Kubernetes
+
+First, you need to create a secret containing your service account credentials.
+
+```
+kubectl create secret generic waldo-creds --from-file=waldo-creds.json
+```
+
+Edit waldo-deployment.yaml to contain your zone name, record name. etc.
+
+Then create the deployment.
+
+```
+kubectl apply -f waldo-deployment.yaml
+```
+
 ## Command Line Flags
 
 ```

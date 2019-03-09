@@ -1,6 +1,6 @@
 FROM golang:1 as builder
 WORKDIR /go/src/github.com/jforman/waldo
-COPY . ./
+COPY waldo.go ./
 RUN go get ./...
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o waldo waldo.go
 
