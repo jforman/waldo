@@ -6,7 +6,7 @@ COPY go.mod .
 COPY go.sum .
 RUN go mod download
 
-RUN go build -o waldo waldo.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o waldo waldo.go
 
 FROM alpine:3.9
 RUN apk add --no-cache ca-certificates
