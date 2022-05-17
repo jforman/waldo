@@ -10,10 +10,4 @@
 
 local_workdir=$(cd $(dirname $(dirname "${BASH_SOURCE[0]}")) >/dev/null 2>&1 && pwd)
 
-docker build -t jforman/waldo-dev:latest .
-
-docker run --rm -it \
-    --name waldo-dev \
-    --volume $local_workdir:/go/src/github.com/jforman/waldo \
-    --workdir /go/src/github.com/jforman/waldo \
-    jforman/waldo-dev:latest
+docker build -f Dockerfile.build -t jforman/waldo:latest .

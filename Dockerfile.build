@@ -1,0 +1,14 @@
+FROM golang:1 as builder
+WORKDIR /go/src/github.com/jforman/waldo
+
+COPY waldo.go .
+COPY go.mod .
+COPY go.sum .
+RUN go mod download
+
+RUN go build -o waldo waldo.go
+
+FROM alpine:3.9
+RUN apk add --no-cache ca-certificates
+WORKDIR /
+COPY --from=builder /go/src/github.com/jforman/waldo .

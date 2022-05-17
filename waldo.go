@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rdegges/go-ipify"
+    "github.com/rs/zerolog"
+    "github.com/rs/zerolog/log"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -54,6 +56,11 @@ func getFormattedRecordName(recordName string) string {
 
 func getDNSClient() (*dns.Service, error) {
 	// https://github.com/golang/oauth2/blob/master/google/example_test.go
+	if credentialsPath == "" {
+		log.Warn().Msg("No oauth credentials path passed, so no actual DNS updates will be performed.")
+		return nil, nil
+	}
+
 	data, err := ioutil.ReadFile(credentialsPath)
 	if err != nil {
 		return nil, err
@@ -95,7 +102,7 @@ func getDNSRecord(dnsClient *dns.Service, recordName string, cloudIpAddress stri
 }
 
 func deleteDNSRecord(dnsClient *dns.Service, resourceRecordSet *dns.ResourceRecordSet) error {
-	fmt.Printf("Attempting to delete record %v.\n", resourceRecordSet.Name)
+	log.Info().Msgf("Attempting to delete record %v.", resourceRecordSet.Name)
 	change := &dns.Change{
 		Deletions: []*dns.ResourceRecordSet{resourceRecordSet},
 	}
@@ -123,7 +130,7 @@ func addDNSRecord(dnsClient *dns.Service, ipAddress string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Record %v updated to point to %v.\n", recordName, ipAddress)
+	log.Info().Msgf("Record %v updated to point to %v.", recordName, ipAddress)
 	return nil
 }
 
@@ -133,33 +140,34 @@ func main() {
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	zerolog.TimeFieldFormat = "2006-01-02T15:04:05 -0700"
+
+	log.Info().Msgf("Waldo started. waitDuration: %v, oneShot: %v, credentialsPath: %v, recordName: %v, managedZone: %v, project: %v, recordType: %v, recordTTL: %v.", waitDuration, oneShot, credentialsPath, recordName, managedZone, project, recordType, recordTTL)
 
 	err = os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath)
 	if err != nil {
-		fmt.Printf("Error parsing application credentials: %v.\n", err)
+		log.Error().Msgf("Error parsing application credentials: %v.", err)
 		os.Exit(1)
 	}
 
 	dnsClient, err := getDNSClient()
 	if err != nil {
-		fmt.Printf("Error getting dnsClient: %v.\n", err)
+		log.Error().Msgf("Error getting dnsClient: %v.", err)
 		os.Exit(1)
 	}
 
 	// Create function to die when receiving SIGINT/SIGTERM.
 	go func() {
 		sig := <-sigs
-		fmt.Printf("Received signal! %v.\n", sig)
+		log.Info().Msgf("Received signal! %v.", sig)
 		os.Exit(0)
 	}()
-
-	fmt.Printf("Waldo started. waitDuration: %v, oneShot: %v, credentialsPath: %v, recordName: %v, managedZone: %v, project: %v, recordType: %v, recordTTL: %v.\n", waitDuration, oneShot, credentialsPath, recordName, managedZone, project, recordType, recordTTL)
 
 	for {
 		externalIP, err := ipify.GetIp()
 
 		if err != nil {
-			fmt.Printf("Unable to determine external IP address: %v. No update performed. \n", err)
+			log.Info().Msgf("Unable to determine external IP address: %v. No update performed.", err)
 			time.Sleep(waitDuration)
 			if oneShot {
 				os.Exit(1)
@@ -167,9 +175,15 @@ func main() {
 			continue
 		}
 
+		if dnsClient == nil {
+			log.Info().Msgf("No DNS client to update. External IP: %s.", externalIP)
+			time.Sleep(waitDuration)
+			continue
+		}
+
 		record, doesIpMatch, err := getDNSRecord(dnsClient, recordName, externalIP)
 		if err != nil {
-			fmt.Printf("Error getting DNS record: %v. Skipping evaluation.\n", err)
+			log.Error().Msgf("Error getting DNS record: %v. Skipping evaluation.", err)
 			if oneShot {
 				os.Exit(1)
 			}
@@ -180,24 +194,24 @@ func main() {
 		if record != nil {
 			if doesIpMatch {
 				if oneShot {
-					fmt.Println("IP addresses match. Nothing to do in oneShot mode.")
+					log.Info().Msg("IP addresses match. Nothing to do in oneShot mode.")
 					os.Exit(0)
 				}
 				time.Sleep(waitDuration)
 				continue
 			}
 			// Record exists, but IP does not match. So we need to delete the old one.
-			fmt.Println("IP address of record does not match record.")
+			log.Info().Msg("IP address of record does not match record.")
 			err := deleteDNSRecord(dnsClient, record)
 			if err != nil {
-				fmt.Printf("Error in deleting record: %v.\n", err)
+				log.Error().Msgf("Error in deleting record: %v.", err)
 			}
 		}
 
 		// No previous record was found. So let's add it.
 		err = addDNSRecord(dnsClient, externalIP)
 		if err != nil {
-			fmt.Printf("Error in adding DNS record: %v.\n", err)
+			log.Info().Msgf("Error in adding DNS record: %v.", err)
 		}
 		if oneShot {
 			os.Exit(0)
